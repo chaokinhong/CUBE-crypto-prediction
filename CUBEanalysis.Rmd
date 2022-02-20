@@ -1,0 +1,272 @@
+---
+title: "Part C"
+output: html_document
+---
+
+## Load library
+```{r}
+library(tidyverse)
+library(readxl)
+library(glmnet)
+library(shiny)
+Sys.setenv(LANG = "en")
+Sys.setlocale("LC_TIME", "C")
+```
+
+## Load data
+```{r}
+folder_path <- 'C:/Users/Cam/Desktop/UOB/SCEM/Final project/cypto/'
+file_name <- 'cube.csv'
+file_name1 <- 'sand.csv'
+file_name2 <- 'mana.csv'
+file_name3 <- 'dji.csv'
+file_name4 <- 'hsi.csv'
+file_name5 <- 'nasdaq.csv'
+file_path <- paste(folder_path,file_name,sep = "")
+file_path1 <- paste(folder_path,file_name1,sep = "")
+file_path2 <- paste(folder_path,file_name2,sep = "")
+file_path3 <- paste(folder_path,file_name3,sep = "")
+file_path4 <- paste(folder_path,file_name4,sep = "")
+file_path5 <- paste(folder_path,file_name5,sep = "")
+cube_df_original <- read.csv(file_path)
+sand_df_original <- read.csv(file_path1)
+mana_df_original <- read.csv(file_path2)
+dow_jones_index_original <- read.csv(file_path3,check.names = F)
+hk_hang_sang_index_original <- read.csv(file_path4,check.names = F)
+nasdaq_index_original <- read.csv(file_path5,check.names = F)
+head(dow_jones_index_original)
+
+```
+
+## Data wrangling
+```{r}
+cube_df <- cube_df_original %>% select(snapped_at,price) %>% rename(Date= snapped_at) %>% separate(Date,into = c('Date','Time','Zone') ,sep=' ') %>% select(Date,price)
+sand_df <- sand_df_original %>% select(snapped_at,price) %>% rename(Date= snapped_at) %>% separate(Date,into = c('Date','Time','Zone') ,sep=' ') %>% select(Date,price)
+mana_df <- mana_df_original %>% select(snapped_at,price) %>% rename(Date= snapped_at) %>% separate(Date,into = c('Date','Time','Zone') ,sep=' ') %>% select(Date,price)
+
+
+## character to numeric, remove comma and space in character
+dow_jones_index_df <- dow_jones_index_original %>% select(Date,Price) %>% mutate(price_tomorrow=lag(Price),Name='dow jones') %>% transform(Price=as.numeric(gsub(',','',Price)),price_tomorrow=as.numeric(gsub(',','',price_tomorrow))) 
+## date 2020-12-14 to 2021-12-14
+
+
+hk_hang_sang_index_df <- hk_hang_sang_index_original %>% select(Date,Price) %>% mutate(price_tomorrow=lag(Price),Name='hk hang sang') %>% transform(Price=as.numeric(gsub(',','',Price)),price_tomorrow=as.numeric(gsub(',','',price_tomorrow))) 
+hk_hang_sang_index_df <- hk_hang_sang_index_df[-1,]
+
+
+nasdaq_index_df <- nasdaq_index_original %>% select(Date,Price) %>% mutate(price_tomorrow=lag(Price),Name='nasdaq') %>% transform(Price=as.numeric(gsub(',','',Price)),price_tomorrow=as.numeric(gsub(',','',price_tomorrow))) 
+nasdaq_index_df <- nasdaq_index_df[-1,]
+
+
+## change date to date format
+cube_df$Date<- as.Date(cube_df$Date)
+sand_df$Date <- as.Date(sand_df$Date)
+mana_df$Date <- as.Date(mana_df$Date)
+dow_jones_index_df$Date <- as.Date(dow_jones_index_df$Date,"%d-%b-%y")
+nasdaq_index_df$Date <- as.Date(nasdaq_index_df$Date,"%d-%b-%y")
+hk_hang_sang_index_df$Date <- as.Date(hk_hang_sang_index_df$Date,"%d-%b-%y")
+
+
+## asscending order by date
+
+dow_jones_index_df <- dow_jones_index_df[order(dow_jones_index_df$Date),]
+nasdaq_index_df <- nasdaq_index_df[order(nasdaq_index_df$Date),]
+hk_hang_sang_index_df <- hk_hang_sang_index_df[order(hk_hang_sang_index_df$Date),]
+
+
+## filter all data in 1 year
+cube_df_data <- cube_df %>% filter(Date >= '2020-12-14' & Date <= '2021-12-14') %>% mutate('Name'='Cube')
+sand_df_data <- sand_df %>% filter(Date >= '2020-12-14' & Date <= '2021-12-14') %>% mutate('Name'='Sand')
+mana_df_data <- mana_df %>% filter(Date >= '2020-12-14' & Date <= '2021-12-14') %>% mutate('Name'='Mana')
+
+
+
+
+
+## df for plot
+crypto_df <- cube_df_data %>% rbind(sand_df_data) %>% rbind(mana_df_data)
+index_df <- dow_jones_index_df %>% rbind(nasdaq_index_df) %>% rbind(hk_hang_sang_index_df)
+
+
+## overview of df
+head(cube_df_data)
+head(sand_df_data)
+head(mana_df_data)
+head(dow_jones_index_df)
+head(nasdaq_index_df)
+head(hk_hang_sang_index_df)
+
+
+
+```
+
+
+## Visualisation
+```{r}
+## crypto price line plot
+crypto_df %>% group_by(Name) %>% ggplot(aes(x=Date,y=price,color=Name)) + geom_line() + theme_bw() + ylab('Price') + xlab('Date')
+
+
+## index line plot
+## asscending order by date
+index_df <- index_df[order(index_df$Date),]
+## convert character to numeric, remove comma and space in character
+index_df <- transform(index_df,Price=as.numeric(gsub(',','',Price)),price_tomorrow=as.numeric(gsub(',','',price_tomorrow)))
+index_df %>% group_by(Name) %>% ggplot(aes(x=Date,y=Price,color=Name)) + geom_line() + theme_bw() +ylab('Price') +xlab('Date')
+head(index_df)
+
+## trend line show the relationship between two variable
+### note: pivot_wider issue “Values in `values_from` are not uniquely identified; output will contain list-cols
+### sol: create a unique row number
+## price trend line plot
+cube_vs_sand_price_trendline <- crypto_df %>% group_by(Name,Date) %>% filter(Name=='Cube'|Name=='Sand') %>% mutate(row = row_number())%>% pivot_wider(names_from = Name,values_from = price) %>% select(-row) %>% ggplot(aes(x=Sand,y=Cube)) + xlab('Sand Price') + ylab('Cube Price') + geom_point() + geom_smooth()
+cube_vs_mana_price_trendline <- crypto_df %>% group_by(Name,Date) %>% filter(Name=='Cube'|Name=='Mana') %>% mutate(row = row_number())%>% pivot_wider(names_from = Name,values_from = price) %>% select(-row) %>% ggplot(aes(x=Mana,y=Cube)) + xlab('Mana Price') + ylab('Cube Price') + geom_point() + geom_smooth()
+cube_vs_sand_price_trendline
+cube_vs_mana_price_trendline
+
+
+
+```
+
+## Analysis
+```{r}
+## price correlation 
+## convert df to wider format for pairwise correlation
+index_df_dowjones <- dow_jones_index_df %>% select(Date,Price) %>% rename('Dow Jones'='Price')
+index_df_nasdaq <- nasdaq_index_df %>% select(Date,Price) %>% rename('Nasdaq'='Price')
+index_df_hkhangsang <- hk_hang_sang_index_df %>% select(Date,Price) %>% rename('Hang Sang'='Price')
+cor_df_wider <- crypto_df  %>%group_by(Name,Date) %>% mutate(row=row_number()) %>%pivot_wider(names_from = Name,values_from = price) %>% select(-row) %>% head(-1) %>% right_join(index_df_dowjones) %>% right_join(index_df_nasdaq) %>% right_join(index_df_hkhangsang) %>% head(-6)
+head(cor_df_wider)
+
+
+## pull the column for test without date columns
+cor_df_sand <- cor_df_wider %>% pull(Sand) %>% replace_na(0.443754253314923)
+cor_df_cube <- cor_df_wider %>% pull(Cube)
+cor_df_mana <- cor_df_wider %>% pull(Mana) %>% replace_na(1.26329630210169)
+cor_df_dowjones <- cor_df_wider %>% pull(`Dow Jones`)
+cor_df_nasdaq <- cor_df_wider %>% pull(Nasdaq)
+cor_df_hangsang <- cor_df_wider %>% pull(`Hang Sang`)
+
+
+## a new df for correlation test
+correlation_df_test <- data.frame(Sand=cor_df_sand,Cube=cor_df_cube,Mana=cor_df_mana,'Dow Jones'=cor_df_dowjones,Nasdaq=cor_df_nasdaq,'Hang Sang'=cor_df_hangsang)
+correlation_df_test %>% cor(use = 'pairwise.complete.obs')
+
+
+## sd to analysis the risk of crypto
+cube_sd <- cor_df_cube %>% sd()
+sand_sd <- cor_df_sand %>% sd()
+mana_sd <- cor_df_mana %>% sd()
+crypto_sd_df <- data.frame(cube_sd,sand_sd,mana_sd)
+crypto_sd_df
+```
+
+
+# Cube Price-predictation model 
+```{r}
+## next day Cube price as label
+cube_label <- correlation_df_test[-1,] %>% pull(Cube)
+cube_price_prediction_df <- correlation_df_test %>% head(-1) %>% mutate(label=cube_label)
+head(cube_price_prediction_df)
+
+## data preparation 
+##cpp=cube price prediction
+## test 1: Ordinary least square
+cpp_num_total <- cube_price_prediction_df %>% nrow()
+cpp_num_train <- floor(cpp_num_total*0.8)
+cpp_num_test <- cpp_num_total - cpp_num_train
+set.seed(123)
+cpp_test_inds <- sample(seq(cpp_num_total),cpp_num_test)
+cpp_train_inds <- setdiff(seq(cpp_num_total),cpp_test_inds)
+cpp_train <- cube_price_prediction_df %>% filter(row_number() %in% cpp_train_inds)
+cpp_test <- cube_price_prediction_df %>% filter(row_number() %in% cpp_test_inds)
+cpp_train_x <- cpp_train %>% select(-label)
+cpp_train_y <- cpp_train %>% pull(label)
+cpp_test_x <- cpp_test %>% select(-label)
+cpp_test_y <- cpp_test %>% pull(label)
+
+
+##OLS solution plot
+cube_price_prediction_df %>%  pivot_longer(cols = c(-label),names_to = 'Crypto',values_to = 'Price') %>% ggplot(aes(x=Price,y=label)) + geom_point() + geom_smooth()
+
+```
+
+
+## Ols model
+```{r}
+## ols model
+cpp_ols_model <- lm(label~.,cpp_train)
+
+
+## model test
+## train error
+cpp_ols_train_predict_y <- predict(cpp_ols_model,cpp_train_x)
+cpp_ols_train_error <- mean((cpp_ols_train_predict_y-cpp_train_y)^2)
+cpp_ols_train_error
+## test error
+cpp_ols_test_predict_y <- predict(cpp_ols_model,cpp_test_x)
+cpp_ols_test_error <- mean((cpp_ols_test_predict_y-cpp_test_y)^2)
+cpp_ols_test_error
+
+
+data_20220102 <- data.frame(Sand=4.33152,Cube=7.0919,Mana=2.45095,Dow.Jones=36338.30,Nasdaq=15644.97,Hang.Sang=23397.67)
+predict_20220102 <- predict(cpp_ols_model,data_20220102)
+predict_20220102
+
+
+```
+
+
+
+
+
+## Shiny web app
+```{r}
+ui <- fluidPage(
+  titlePanel(h1(em('CUBE Price Prediction System'))),
+  fluidRow(
+  column(6, wellPanel(
+  textInput('Sand','Sand:',''),
+  textInput('Cube','Cube:',''),
+  textInput('Mana','Mana:',''),
+  textInput('Dow.Jones','Dow.Jones:',''),
+  textInput('Nasdaq','Nasdaq:',''),
+  textInput('Hang.Sang','Hang.Sang:',''),
+  actionButton("submitbutton", "Submit", class = "btn btn-primary")
+    )
+    ),
+  column(6,
+         verbatimTextOutput('result'))
+  )
+)
+
+server <- function(input,output){
+  datasetInput <- reactive({
+    df <- data.frame('Sand'=as.numeric(input$Sand),'Cube'=as.numeric(input$Cube),'Mana'=as.numeric(input$Mana),'Dow.Jones'=as.numeric(input$Dow.Jones),'Nasdaq'=as.numeric(input$Nasdaq),'Hang.Sang'=as.numeric(input$Hang.Sang))
+    
+   result <- predict(cpp_ols_model,df)
+   
+  })
+  
+ 
+
+  output$result <- renderText({ 
+    if (input$submitbutton>0) { 
+      isolate(paste('Cube Price prediction:',datasetInput())) 
+    } 
+  })
+  
+  
+}
+
+shinyApp(ui=ui,server=server)
+```
+
+
+
+
+
+
+
+
+
